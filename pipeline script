@@ -1,0 +1,202 @@
+### Snippits for NGS pipeline ###
+
+### reference for pipeline v.1 ###
+reference=/reference_files/ucsc.hg19.nohap.masked_v3.fasta
+dbsnp=/reference_files/dbsnp/b150/))-ALL.vcf
+cosmic=/reference_file/cosmic/v67/CosmicCodingMuts_v67_20131024.vcf
+exac_constraints=/sdgs/reference/exac/fordist_cleaned_exac_r03_march16_z_pli_rec_null_data.txt
+gnomad_constraints=/reference/gnomad/gnomad.v2.1.1.lof_metrics.by_gene.json
+clinvar=/reference/clinvar/clinvar_20190527.vcf.gz
+fastqc=/software/FastQC/fastqc
+bwa=/software/bwa-0.7.15/bwa
+samtools=/software/samtools-1.7/samtools
+gatk=/software/GenomeAnalysisTK-3.7/GenomeAnalysisTK.jar
+bamutil=/software/bamUtil_1.0.13/bamUtil/bin/bam
+bedtools=/software/bedtools2/bin/bedtools
+sambamba=/software/sambamba_v0.6.7/sambamba
+picard=/software/picard-tools-2.5.0
+snpeff=/software/snpEff-4.3i/SnpSift.jar
+vt=/software/vt/vt
+bcftools=/software/bcftools-1.3.1/bcftools
+
+echo "reference_genome: '${reference} --version'" >> provence.txt
+echo "dbsnp: '${dbsnp} --version'" >> provence.txt
+echo "cosmic: '${cosmic} --version'" >> provence.txt
+echo "exac_constraints: '${exac_constraints} --version'" >> provence.txt
+echo "gnomad_constraints: '${gnomad_constraints} --version'" >> provence.txt
+echo "cosmic: '${cosmic} --version'" >> provence.txt
+echo "clinvar: '${clinvar} --version'" >> provence.txt
+echo "fastqc: '${samtools} --version'" >> provence.txt 
+echo "bwa: '${bwa} --version'" >> provence.txt
+echo "samtools: '${samtools} --version'" >> provence.txt
+echo "gatk: '${gatk} --version'" >> provence.txt
+echo "bamutil: '${bamutil} --version'" >> provence.txt
+echo "bedtool: '${bedtool} --version'" >> provence.txt
+echo "sambamba: '${sambamba} --version'" >> provence.txt
+echo "picard: '${picard} -- version'">> provence.txt
+echo "snpeff: '${snpeff} --version'" >> provence.txt
+echo "vt: '${vt} --version'" >> provence.txt
+echo "bcftool: '${bcftool} --version'" >> provence.txt
+
+#################
+#combine sample runs
+#################
+
+#Concatinate the runs for each sample together 
+cat sample1_L001_R1.fastq.gz \
+sample1_L002_R1.fastq.gz \
+> sample1_R1.fastq.gz
+
+
+#################
+#Sequence QC
+#################
+
+#FastQC produces a .html and .zip sent to the qc folder 
+fastqc \
+path/to/file/sample(1)_R(*).fastq.gz \
+-o /path/to/file/qc
+
+#################
+#Readmapping
+#################
+
+#bwa-mem "@R" performs local alignments and adds header group 
+bwa mem -R "@RG\tID:\tSM:\tLB:\tPL: \
+refernce \
+sample(*)_R1.fastq.gz \ 
+sample(*)_R2.fastq.gz \
+> path/tofile/sample(*).sam
+
+#################
+#Bam file Utilities
+#################
+
+#Covert .sam to .bam
+samtools view -b \
+sample1.sam \
+sample1.bam
+
+#sorting aligment in genome order 
+samtools sort \
+sample1.bam \
+sample1_sorted.bam
+
+#index sorted .bam
+samtools index \
+sample1_sorted_indexed.bam 
+
+#clipOverlaps
+/software/bamUtils-1.0.14/bin/bam clipOverlap \
+--in /home/stpuser/sample1/bam/sample1_sorted_indexed.bam \
+--out /home/stpuser/sample1/bam/sample1_sorted_indexed_clipped.bam \
+
+#Mark duplicates
+java -jar /software/picard/build/libs/picard.jar MarkDuplicates \
+INPUT=/home/stpuser/bam/sample1_sorted_indexed_clipped.bam \
+OUTPUT=/home/stpuser/bam/sample1_sorted_indexed_clipped_marked.bam \
+METRICS_FILE=/home/stpuser/sample1/qc/sample1_sorted_indexed_clipped_marked_duplicates_report.txt \
+VALIDATION_STRINGENCY=SILENT 
+
+#################
+#Assessing coverage
+#################
+
+#sambamba depth base (broad_bed)
+/software/sambamba_v0.71/sambamba depth base
+--min-coverage=30
+--regions /fastq/beds/no_header/{broad_bed} 
+/home/stpuser/sample1/bam/sample1_sorted_indexed_clipped_marked.bam \
+-o /home/stpuser/sample1/coverage/coverage_broad_depth_base.txt
+
+#sambamba depth base (small_bed)
+/software/sambamba_v0.71/sambamba depth base
+--min-coverage=30
+--regions /fastq/beds/no_header/{small_bed} 
+/home/stpuser/sample1/bam/sample1_sorted_indexed_clipped_marked.bam \
+-o /home/stpuser/sample1/coverage/coverage_small_depth_base.txt
+
+#sambamba depth region (braod_bed)
+/software/sambamba_v0.71/sambamba depth region
+-T10 -T20 -T30 -T40 -T50 \
+-L /fastqs/bed/no_header/{broad_bed}
+/home/stpuser/sample1/bam/sample1_sorted_index_clipped_marked.bam \
+-o /home/stpuser/sample1/coverage/coverage_braod_depth_region.txt
+
+#sambamba depth region (small_bed) produces a .txt 
+/software/sambamba_v0.71/sambamba depth region
+-T10 -T20 -T30 -T40 -T50 \
+-L /fastqs/bed/no_header/{small_bed}
+/home/stpuser/sample1/bam/sample1_sorted_index_clipped_marked.bam \
+-o /home/stpuser/sample(*)/coverage/coverage_small_depth_region.txt
+
+#index sorted .bam
+samtools index \
+sample1_sorted_indexed.bam 
+
+######################
+#Call varaint
+######################
+
+#varaint calling genome analysis tool kit 
+gatk --java-options "-Xm4xg" HaplotypeCaller -R \
+refrence \
+-I /home/stpuser/sample1/bam/sample1_sorted_indexed_clipped_marked.bam \
+-O /home/stpuser/sample1/varaint/variant_undecomprosed.vcf
+
+#######################
+#Filter varaints 
+#######################
+
+#bcftools index 
+/software/bcftool-1.9/bcftools index
+/home/stpuser/sample(1)/variant/varaint_undecomposed.vcf
+
+#bcftools filter based on small bed 
+/software/bcftools-1.9/bcftools filter \
+/fastqs/beds/CTD_OI_AD_v3.bed \
+/home/stpuser/sample1/variant/varaint_undecomposed.vcf \
+-o /home/stpuser/sample1/varaint_filtered_undecomposed.vcf
+
+######################
+#VCF file utilites
+#######################
+
+#bcftools - filter - annotate - merge
+  VCF and annotation source 
+  
+  
+#vt decompose 
+/software/vt-057721/vt decompose 
+-o /home/stpuser/sample(1)/varaint/varaint_decomposed.vcf \
+/home/stpuser/sample(1)/varaint/variant_undecomposed.vcf
+
+#vt normalize 
+/software/vt-057721/vt normlize \
+/home/stpuser/sample1/varaint/sample1_variant_decomposed.vcf \
+> -r /reference_files/ucsc.hg19.nohap.masked_v3.fasta \
+-o /home/stpuser/sample1/variant/sample1_varaint_decomposed_normalized.vcf
+
+######################
+#Annotate varaints
+#####################
+
+#snpeff
+/software/snpEff/snpEff.jar ann hg 19 \
+/home/stpuser/sample1/variant/sample1_varaint_decomposed_normalized.vcf \
+> /home/stpuser/sample1/anno/snpeff.g.vcf
+
+#snpsift
+java-jar/software/snpeff/snpsift.jar annotate -id \
+/reference_files/dpsnp/b150/00_All.vcf \
+/home/stpuser/anno/snpeff.g.vcf \
+/home/stpuser/anno/snpeff_snpsift_dbsnp_ID
+
+
+#vcfanno
+#ensembl VEP
+
+#samtools flagstat
+samtools falgstat \
+/home/stpuser/sample(*)/bam/sample(*)_sorted_indexed_clipped_marked.bam
+> /home/stpuser/sample(*)/qc/sample(*)_sorted_indexed_clipped_marked_alignment.txt 
